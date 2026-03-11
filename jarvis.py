@@ -10,20 +10,20 @@ from plotly.subplots import make_subplots
 from streamlit_autorefresh import st_autorefresh
 
 # =========================================================
-# 1. CORE SYSTEM & CONFIG (Evolusi v10.0 - v13.0)
+# 1. CORE SYSTEM & CONFIG
 # =========================================================
 st.set_page_config(page_title="Jarvis v13.0 Omni-Sovereign", layout="wide", page_icon="🔱")
 st_autorefresh(interval=300000, key="jarvis_heartbeat")
 
-# Keamanan API Key
+# Keamanan API Key melalui Streamlit Secrets
 if "GEMINI_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
 else:
-    st.error("❌ API Key Gemini Missing! Check secrets.toml.")
+    st.error("❌ API Key Gemini Missing! Masukkan GEMINI_KEY di Advanced Settings > Secrets.")
     st.stop()
 
 # =========================================================
-# 2. THE BRAIN: ADVANCED ANALYTICS (Synthesis v11.5 & v12.0)
+# 2. THE BRAIN: ADVANCED ANALYTICS
 # =========================================================
 @st.cache_data(ttl=300)
 def fetch_master_data(ticker):
@@ -35,27 +35,29 @@ def fetch_master_data(ticker):
     except: return pd.DataFrame()
 
 def detect_candle_patterns(df):
-    """Mata AI: Pengenalan Pola Visual (v12.0)"""
+    """Mata AI: Pengenalan Pola Visual Candlestick"""
     patterns = []
     last, prev = df.iloc[-1], df.iloc[-2]
     body = abs(last['Close'] - last['Open'])
     range_total = last['High'] - last['Low']
-    # Hammer Detection
+    if range_total == 0: return "Neutral"
+    
+    # Hammer
     if body < (range_total * 0.3) and (last['Low'] < min(last['Open'], last['Close']) - body):
         patterns.append("🔨 Hammer")
-    # Engulfing Detection
+    # Engulfing
     if last['Close'] > prev['Open'] and last['Open'] < prev['Close'] and prev['Close'] < prev['Open']:
         patterns.append("🔥 Engulfing")
-    # Doji Detection
+    # Doji
     if body < (range_total * 0.1):
         patterns.append("⚖️ Doji")
     return ", ".join(patterns) if patterns else "Neutral"
 
 def analyze_supreme_logic(df, ihsg_df=None):
-    """Otak Analisis: Gabungan VPA, RS, MFI, dan Scoring (v10.8 - v12.5)"""
+    """Otak Analisis: Gabungan VPA, RS, MFI, dan Scoring"""
     if df.empty or len(df) < 50: return pd.DataFrame()
     
-    # --- Modul Technical (MA & ATR) ---
+    # Technical Ribbon
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
     df['MA50'] = df['Close'].rolling(50).mean()
@@ -63,37 +65,34 @@ def analyze_supreme_logic(df, ihsg_df=None):
     df['BB_Upper'] = df['MA20'] + (df['Close'].rolling(20).std() * 2)
     df['BB_Lower'] = df['MA20'] - (df['Close'].rolling(20).std() * 2)
     
-    # --- Modul Money Flow (MFI Precision v10.8) ---
+    # Money Flow Index (MFI)
     tp = (df['High'] + df['Low'] + df['Close']) / 3
     mf = tp * df['Volume']
     pos_mf = mf.where(tp.diff() > 0, 0).rolling(14).sum()
     neg_mf = mf.where(tp.diff() < 0, 0).rolling(14).sum()
     df['MFI'] = 100 - (100 / (1 + (pos_mf / neg_mf)))
     
-    # --- Modul VPA: Trap & Accumulation (v12.0) ---
+    # VPA: Trap & Accumulation
     df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
     price_chg = df['Close'].pct_change()
     df['VPA_Desc'] = "Sideways"
     df.loc[(df['Vol_Ratio'] > 1.5) & (price_chg > 0.02), 'VPA_Desc'] = "Accumulation"
     df.loc[(df['Vol_Ratio'] > 1.8) & (price_chg.abs() < 0.005), 'VPA_Desc'] = "🚨 BULL TRAP"
     
-    # --- Modul Relative Strength (RS Smoothing v11.5) ---
+    # Relative Strength (RS) vs IHSG
     if ihsg_df is not None and not ihsg_df.empty:
         ih_c = ihsg_df['Close'].reindex(df.index, method='ffill')
         raw_rs = (df['Close'] / df['Close'].iloc[0]) / (ih_c / ih_c.iloc[0])
-        df['RS'] = raw_rs.rolling(5).mean() # Smoothing filter
+        df['RS'] = raw_rs.rolling(5).mean()
     else: df['RS'] = 1.0
     
-    # --- Sovereign Scoring System (v10.8-v13.0) ---
+    # Sovereign Scoring System
     df['Score'] = ((df['MFI'] > 55).astype(int) * 25) + \
                   ((df['Close'] > df['MA20']).astype(int) * 25) + \
                   ((df['RS'] > df['RS'].shift(1)).astype(int) * 25) + \
                   ((df['MA5'] > df['MA20']).astype(int) * 25)
     return df.dropna()
 
-# =========================================================
-# 3. PERFORMANCE VALIDATOR (v10.8 Backtest Engine)
-# =========================================================
 def run_backtest(df):
     df = df.copy()
     df['Signal'] = np.where(df['Score'] >= 75, 1, 0)
@@ -104,29 +103,27 @@ def run_backtest(df):
     return win_rate, cum_profit * 100
 
 # =========================================================
-# 4. INTERFACE: OMNI-COMMAND CENTER (v13.0)
+# 3. INTERFACE: OMNI-COMMAND CENTER
 # =========================================================
 watchlist = ["BBRI.JK", "BBCA.JK", "BMRI.JK", "BBNI.JK", "TLKM.JK", "ASII.JK", "ADRO.JK", "GOTO.JK", "ANTM.JK", "PTBA.JK", "MEDC.JK", "BRIS.JK", "TPIA.JK"]
-st.title("🔱 Jarvis v13.0: Sovereign Omniscience")
+st.title("🔱 Jarvis v13.0 Omni-Sovereign")
 
 ihsg = fetch_master_data("^JKSE")
 
-# Sidebar: Risk & Alert Architect
 with st.sidebar:
-    st.header("🛡️ Tactical Risk")
+    st.header("🛡️ Tactical Shield")
     alert_box = st.container()
     st.divider()
-    cap = st.number_input("Total Modal (Rp)", value=10000000, step=1000000)
+    cap = st.number_input("Modal Capital (Rp)", value=10000000, step=1000000)
     risk_pct = st.select_slider("Risk per Trade (%)", options=[0.5, 1.0, 2.0], value=1.0)
     sel = st.selectbox("🎯 Target Select", watchlist)
     st.divider()
-    st.info("Status: Monitoring Real-Time Data")
+    st.info("Status: Live Analytics Active")
 
-# Tab System: Menyatukan Semua Fitur Utama
-tab_scan, tab_sniper, tab_validate, tab_intel = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "🧠 OMNI-INTEL"])
+tab_radar, tab_sniper, tab_validate, tab_oracle = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "🧠 OMNI-INTEL"])
 
-# --- TAB 1: RADAR (Global Screener & Heatmap v13.0) ---
-with tab_scan:
+# --- TAB 1: GLOBAL RADAR ---
+with tab_radar:
     if st.button("🛰️ EXECUTE SUPREME SCAN"):
         res = []
         for t in watchlist:
@@ -137,14 +134,14 @@ with tab_scan:
                     "Ticker": t, "Price": f"{d['Close'].iloc[-1]:,.0f}", "Score": score,
                     "VPA": d['VPA_Desc'].iloc[-1], "Pattern": detect_candle_patterns(d)
                 })
-                if score >= 90: alert_box.warning(f"🚀 HIGH CONVICTION: {t} ({score}%)")
+                if score >= 90: alert_box.warning(f"🚀 HIGH CONVICTION: {t}")
         
         df_res = pd.DataFrame(res)
         c1, c2 = st.columns([3, 1])
         with c1: st.dataframe(df_res.style.background_gradient(subset=['Score'], cmap='RdYlGn'), use_container_width=True)
         with c2: st.bar_chart(df_res.set_index('Ticker')['Score'])
 
-# --- TAB 2: TACTICAL SNIPER (Analysis & Charting v12.5) ---
+# --- TAB 2: TACTICAL SNIPER ---
 with tab_sniper:
     df = analyze_supreme_logic(fetch_master_data(sel), ihsg)
     if not df.empty:
@@ -152,21 +149,20 @@ with tab_sniper:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Live Price", f"Rp {c_val:,.0f}")
         m2.metric("Apex Score", f"{s_val}%")
-        m3.metric("Candle Pattern", detect_candle_patterns(df))
-        m4.metric("VPA Status", df['VPA_Desc'].iloc[-1])
+        m3.metric("Pattern", detect_candle_patterns(df))
+        m4.metric("VPA", df['VPA_Desc'].iloc[-1])
 
         l_col, r_col = st.columns([1.5, 2.5])
         with l_col:
             st.subheader("⚔️ Execution Plan")
-            sl = int(c_val - (atr * 2.2)) # Safety SL buffer
+            sl = int(c_val - (atr * 2.2))
             risk_amt = cap * (risk_pct / 100)
             lots = int(risk_amt / ((c_val - sl) * 100)) if (c_val-sl) > 0 else 0
             
             st.success(f"**ENTRY:** {int(c_val):,.0f}")
             st.error(f"**STOP LOSS:** {sl:,.0f}")
-            st.info(f"**POSITION SIZE:** {lots} Lots")
+            st.info(f"**SIZE:** {lots} Lots")
             
-            # AI Forecast (v10.8)
             try:
                 m_prop = Prophet(daily_seasonality=True).fit(df.reset_index()[['Date','Close']].rename(columns={'Date':'ds','Close':'y'}))
                 future = m_prop.predict(m_prop.make_future_dataframe(periods=2))
@@ -176,7 +172,7 @@ with tab_sniper:
         with r_col:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
             fig.add_trace(go.Candlestick(x=df.index[-60:], open=df['Open'][-60:], high=df['High'][-60:], low=df['Low'][-60:], close=df['Close'][-60:], name="Price"), row=1, col=1)
-            # Volume Profile Overlay (v12.0)
+            # Volume Profile
             counts, bins = np.histogram(df['Close'][-60:], bins=10, weights=df['Volume'][-60:])
             for i in range(len(counts)):
                 w = (counts[i]/counts.max()) * 7
@@ -185,33 +181,32 @@ with tab_sniper:
             fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
             st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 3: VALIDATOR (Backtest v10.8) ---
+# --- TAB 3: VALIDATOR ---
 with tab_validate:
-    st.subheader(f"📈 Strategic Edge: {sel}")
-    wr, profit = run_backtest(df.iloc[-252:]) # Test 1 tahun terakhir
+    st.subheader(f"📈 Backtest Edge: {sel}")
+    wr, profit = run_backtest(df.iloc[-252:])
     v1, v2 = st.columns(2)
-    v1.metric("Historical Win Rate", f"{wr:.1f}%")
-    v2.metric("Cumulative Profit vs B&H", f"{profit:.2f}%")
+    v1.metric("Win Rate", f"{wr:.1f}%")
+    v2.metric("Profit vs B&H", f"{profit:.2f}%")
     df_bt = df.iloc[-252:].copy()
     df_bt['Equity'] = (np.where(df_bt['Score'] >= 75, 1, 0).astype(float) * df_bt['Close'].pct_change().fillna(0) + 1).cumprod()
     st.line_chart(df_bt['Equity'])
 
-# --- TAB 4: OMNI-INTEL (AI & News Context v10.8-v13.0) ---
+# --- TAB 4: OMNI-INTEL ---
 with tab_intel:
     c_l, c_r = st.columns(2)
     with c_l:
-        st.subheader("🧠 Gemini Oracle Analysis")
-        if st.button("🔮 Generate Deep AI Insight"):
+        st.subheader("🧠 Gemini Oracle")
+        if st.button("🔮 Deep Analysis"):
             model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            prompt = f"Analisis IDX:{sel}. Harga:{c_val}, Score:{s_val}%, Pattern:{detect_candle_patterns(df)}, VPA:{df['VPA_Desc'].iloc[-1]}. Beri instruksi trading dalam 3 poin."
+            prompt = f"Analisis IDX:{sel}. Harga:{c_val}, Score:{s_val}%, Pattern:{detect_candle_patterns(df)}, VPA:{df['VPA_Desc'].iloc[-1]}. Beri 3 instruksi strategi."
             res = model.generate_content(prompt)
             st.success(res.text)
         
         st.divider()
-        st.markdown("**Stockbit Post Generator:**")
-        st.code(f"${sel} Analysis 🔱\nScore: {s_val}%\nVPA: {df['VPA_Desc'].iloc[-1]}\nPattern: {detect_candle_patterns(df)}\nPlan: Buy {int(c_val)}, SL {sl}\n#Jarvisv13")
+        st.code(f"${sel} Analysis 🔱\nScore: {s_val}%\nVPA: {df['VPA_Desc'].iloc[-1]}\nPlan: Buy {int(c_val)}, SL {sl}")
 
     with c_r:
-        st.subheader("📰 Live Market Context")
+        st.subheader("📰 Live Context")
         news_feed = feedparser.parse(f"https://news.google.com/rss/search?q={sel}+stock+idx")
         for entry in news_feed.entries[:5]: st.write(f"- [{entry.title}]({entry.link})")
