@@ -15,6 +15,7 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Jarvis v13.0 Omni-Sovereign", layout="wide", page_icon="🔱")
 st_autorefresh(interval=300000, key="jarvis_heartbeat")
 
+# Keamanan API Key
 if "GEMINI_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
 else:
@@ -35,6 +36,7 @@ def fetch_master_data(ticker):
 
 def run_backtest(df):
     df = df.copy()
+    if 'Score' not in df.columns: return 0, 0
     df['Signal'] = np.where(df['Score'] >= 75, 1, 0)
     df['Returns'] = df['Close'].pct_change()
     df['Strategy_Returns'] = df['Signal'].shift(1) * df['Returns']
@@ -59,9 +61,9 @@ def detect_candle_patterns(df):
 
 def analyze_supreme_logic(df, ihsg_df=None):
     if df.empty or len(df) < 50: return pd.DataFrame()
+    df = df.copy()
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
-    df['MA50'] = df['Close'].rolling(50).mean()
     df['ATR'] = (df['High'] - df['Low']).rolling(14).mean()
     
     tp_idx = (df['High'] + df['Low'] + df['Close']) / 3
@@ -101,6 +103,17 @@ with st.sidebar:
     risk_pct = st.select_slider("Risk per Trade (%)", options=[0.5, 1.0, 2.0], value=1.0)
     sel = st.selectbox("🎯 Target Select", watchlist)
 
+# Inisialisasi Data Global agar bisa diakses antar Tab
+df_main = analyze_supreme_logic(fetch_master_data(sel), ihsg)
+
+if not df_main.empty:
+    # Simpan ke session_state agar aman saat pindah tab
+    st.session_state.current_ticker = sel
+    st.session_state.c_val = df_main['Close'].iloc[-1]
+    st.session_state.atr = df_main['ATR'].iloc[-1]
+    st.session_state.tp_1 = int(st.session_state.c_val + (st.session_state.atr * 2))
+    st.session_state.sl = int(st.session_state.c_val - (st.session_state.atr * 2))
+
 tab_radar, tab_sniper, tab_validate, tab_oracle = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "🧠 OMNI-INTEL"])
 
 with tab_radar:
@@ -109,62 +122,66 @@ with tab_radar:
         for t in watchlist:
             d = analyze_supreme_logic(fetch_master_data(t), ihsg)
             if not d.empty:
-                c_val = d['Close'].iloc[-1]
-                atr_val = d['ATR'].iloc[-1]
+                cv = d['Close'].iloc[-1]
+                av = d['ATR'].iloc[-1]
                 res.append({
-                    "Ticker": t, "Price": f"{c_val:,.0f}", "Score": d['Score'].iloc[-1],
-                    "TP1": f"{int(c_val + (atr_val * 2)):,.0f}",
-                    "VPA": d['VPA_Desc'].iloc[-1]
+                    "Ticker": t, "Price": f"{cv:,.0f}", "Score": d['Score'].iloc[-1],
+                    "TP1": f"{int(cv + (av * 2)):,.0f}", "VPA": d['VPA_Desc'].iloc[-1]
                 })
         st.dataframe(pd.DataFrame(res).style.background_gradient(subset=['Score'], cmap='RdYlGn'), use_container_width=True)
 
 with tab_sniper:
-    df = analyze_supreme_logic(fetch_master_data(sel), ihsg)
-    if not df.empty:
-        c_val, s_val, atr = df['Close'].iloc[-1], df['Score'].iloc[-1], df['ATR'].iloc[-1]
-        sl, tp_1, tp_2 = int(c_val - (atr * 2)), int(c_val + (atr * 2)), int(c_val + (atr * 4))
-        
+    if not df_main.empty:
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Live Price", f"Rp {c_val:,.0f}")
-        m2.metric("Apex Score", f"{s_val}%")
-        m3.metric("Pattern", detect_candle_patterns(df))
-        m4.metric("VPA Status", df['VPA_Desc'].iloc[-1])
+        m1.metric("Live Price", f"Rp {st.session_state.c_val:,.0f}")
+        m2.metric("Apex Score", f"{df_main['Score'].iloc[-1]}%")
+        m3.metric("Pattern", detect_candle_patterns(df_main))
+        m4.metric("VPA Status", df_main['VPA_Desc'].iloc[-1])
 
         l_col, r_col = st.columns([1.5, 2.5])
         with l_col:
             st.subheader("⚔️ Trading Plan")
-            st.write(f"**Entry:** {int(c_val):,.0f}")
-            st.error(f"**Stop Loss:** {sl:,.0f}")
-            st.success(f"**TP 1:** {tp_1:,.0f}")
-            st.success(f"**TP 2:** {tp_2:,.0f}")
+            st.write(f"**Entry:** {int(st.session_state.c_val):,.0f}")
+            st.error(f"**Stop Loss:** {st.session_state.sl:,.0f}")
+            st.success(f"**TP 1:** {st.session_state.tp_1:,.0f}")
             risk_amt = cap * (risk_pct / 100)
-            risk_ps = c_val - sl
+            risk_ps = st.session_state.c_val - st.session_state.sl
             lots = int(risk_amt / (risk_ps * 100)) if risk_ps > 0 else 0
             st.info(f"**Size:** {lots} Lots")
 
         with r_col:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
-            fig.add_trace(go.Candlestick(x=df.index[-60:], open=df['Open'][-60:], high=df['High'][-60:], low=df['Low'][-60:], close=df['Close'][-60:], name="Price"), row=1, col=1)
-            fig.add_hline(y=tp_1, line_dash="dash", line_color="green", row=1, col=1)
-            fig.add_hline(y=sl, line_dash="dash", line_color="red", row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index[-60:], y=df['MFI'][-60:], line=dict(color='cyan'), fill='tozeroy', name="MFI Flow"), row=2, col=1)
+            fig.add_trace(go.Candlestick(x=df_main.index[-60:], open=df_main['Open'][-60:], high=df_main['High'][-60:], low=df_main['Low'][-60:], close=df_main['Close'][-60:], name="Price"), row=1, col=1)
+            fig.add_hline(y=st.session_state.tp_1, line_dash="dash", line_color="green", row=1, col=1)
+            fig.add_hline(y=st.session_state.sl, line_dash="dash", line_color="red", row=1, col=1)
+            fig.add_trace(go.Scatter(x=df_main.index[-60:], y=df_main['MFI'][-60:], line=dict(color='cyan'), fill='tozeroy', name="MFI"), row=2, col=1)
             fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
             st.plotly_chart(fig, use_container_width=True)
 
 with tab_validate:
-    st.subheader(f"📈 Strategic Validation: {sel}")
-    wr, profit = run_backtest(df.iloc[-252:])
-    st.metric("Win Rate", f"{wr:.1f}%")
-    st.line_chart(df.iloc[-252:]['Close'])
+    if not df_main.empty:
+        st.subheader(f"📈 Strategic Validation: {sel}")
+        wr, profit = run_backtest(df_main.iloc[-252:])
+        st.metric("Win Rate", f"{wr:.1f}%")
+        st.line_chart(df_main.iloc[-252:]['Close'])
 
 with tab_oracle:
-    if st.button("🔮 Deep Analysis"):
-        models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-        for m_name in models:
-            try:
-                model = genai.GenerativeModel(m_name)
-                res = model.generate_content(f"Analisis IDX:{sel}. Harga:{c_val}, TP:{tp_1}, SL:{sl}. Bahasa Indonesia.")
-                st.success(f"Analisis via {m_name}")
-                st.write(res.text)
-                break
-            except: continue
+    st.subheader("🧠 Gemini Oracle Analysis")
+    if st.button("🔮 Run Deep Analysis"):
+        with st.spinner("Menghubungi Oracle..."):
+            models = ['gemini-1.5-flash', 'gemini-pro']
+            success = False
+            for m_name in models:
+                try:
+                    model = genai.GenerativeModel(m_name)
+                    # Mengambil data dari variabel yang sudah kita simpan tadi
+                    prompt = f"Analisis teknikal IDX:{st.session_state.current_ticker}. Harga:{st.session_state.c_val}, TP:{st.session_state.tp_1}, SL:{st.session_state.sl}. Berikan strategi singkat dalam Bahasa Indonesia."
+                    res = model.generate_content(prompt)
+                    st.success(f"Analisis Berhasil (Model: {m_name})")
+                    st.markdown(res.text)
+                    success = True
+                    break
+                except Exception as e:
+                    continue
+            if not success:
+                st.error("Gagal terhubung ke AI. Cek kuota atau koneksi internet.")
