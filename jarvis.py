@@ -21,7 +21,6 @@ else:
     st.error("❌ API Key Gemini Missing! Masukkan GEMINI_KEY di Secrets.")
     st.stop()
 
-# Inisialisasi Database Portfolio di Session State
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = {}
 
@@ -129,6 +128,7 @@ if not df_main.empty:
 
 tab_radar, tab_sniper, tab_validate, tab_portfolio, tab_oracle = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "💼 PORTFOLIO", "🧠 OMNI-INTEL"])
 
+# ... (Tab Radar & Sniper tetap sama)
 with tab_radar:
     if st.button("🛰️ EXECUTE SUPREME SCAN"):
         res = []
@@ -159,15 +159,15 @@ with tab_sniper:
             st.success(f"**TP 1:** {st.session_state.tp_1:,.0f}")
             risk_amt = cap * (risk_pct / 100)
             risk_ps = st.session_state.c_val - st.session_state.sl
-            lots = int(risk_amt / (risk_ps * 100)) if risk_ps > 0 else 0
-            st.info(f"**Size Recommendation:** {lots} Lots")
+            lots_rec = int(risk_amt / (risk_ps * 100)) if risk_ps > 0 else 0
+            st.info(f"**Size Recommendation:** {lots_rec} Lots")
 
         with r_col:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
             fig.add_trace(go.Candlestick(x=df_main.index[-60:], open=df_main['Open'][-60:], high=df_main['High'][-60:], low=df_main['Low'][-60:], close=df_main['Close'][-60:], name="Price"), row=1, col=1)
             fig.add_hline(y=st.session_state.tp_1, line_dash="dash", line_color="green", row=1, col=1)
             fig.add_hline(y=st.session_state.sl, line_dash="dash", line_color="red", row=1, col=1)
-            fig.add_trace(go.Scatter(x=df_main.index[-60:], y=df_main['MFI'][-60:], line=dict(color='cyan'), fill='tozeroy', name="MFI"), row=2, col=1)
+            fig.add_trace(go.Scatter(x=df_main.index[-60:], y=df_main['MFI'][-60:], line=dict(color='cyan'), fill='tozeroy', name="MFI Flow"), row=2, col=1)
             fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -178,37 +178,56 @@ with tab_validate:
         st.metric("Win Rate (1Y)", f"{wr:.1f}%")
         st.line_chart(df_main.iloc[-252:]['Close'])
 
+# =========================================================
+# 4. TAB PORTFOLIO (NEW STOCKBIT FORMULA)
+# =========================================================
 with tab_portfolio:
-    st.subheader("📊 My Active Positions")
+    st.subheader("📊 My Active Positions (Estimated Net PnL)")
     if not st.session_state.portfolio:
         st.info("Portfolio kosong. Tambahkan posisi melalui sidebar.")
     else:
         p_data = []
         total_pnl = 0
+        
+        # Konfigurasi Fee Broker (Default Stockbit/Umum)
+        FEE_BELI = 0.0015  # 0.15%
+        FEE_JUAL = 0.0025  # 0.25%
+
         for tick, info in st.session_state.portfolio.items():
-            # Ambil harga terbaru untuk hitung PnL
             current_df = fetch_master_data(tick)
             if not current_df.empty:
-                current_p = current_df['Close'].iloc[-1]
-                buy_p = info['price']
-                lots = info['lots']
-                value_now = current_p * lots * 100
-                value_buy = buy_p * lots * 100
-                pnl = value_now - value_buy
-                pnl_pct = (pnl / value_buy) * 100
-                total_pnl += pnl
+                current_p = float(current_df['Close'].iloc[-1])
+                buy_p = float(info['price'])
+                lots = int(info['lots'])
+                
+                # Formula Pendekatan Stockbit:
+                # Total Modal = (Harga Beli * Lot * 100) + Fee Beli
+                gross_buy_value = buy_p * lots * 100
+                total_buy_cost = gross_buy_value * (1 + FEE_BELI) 
+                
+                # Nilai Jual Bersih = (Harga Sekarang * Lot * 100) - Fee Jual
+                gross_sell_value = current_p * lots * 100
+                total_sell_receive = gross_sell_value * (1 - FEE_JUAL) 
+                
+                # Net PnL
+                net_pnl = total_sell_receive - total_buy_cost
+                pnl_pct = (net_pnl / total_buy_cost) * 100
+                
+                total_pnl += net_pnl
                 
                 p_data.append({
                     "Ticker": tick,
                     "Avg Price": f"{buy_p:,.0f}",
-                    "Current Price": f"{current_p:,.0f}",
+                    "Current": f"{current_p:,.0f}",
                     "Lots": lots,
-                    "PnL (Rp)": f"{pnl:,.0f}",
+                    "Total Cost": f"{total_buy_cost:,.0f}",
+                    "Net PnL (Rp)": f"{net_pnl:,.0f}",
                     "PnL (%)": f"{pnl_pct:.2f}%"
                 })
         
         st.table(pd.DataFrame(p_data))
-        st.metric("Total Unrealized PnL", f"Rp {total_pnl:,.0f}", delta=f"{total_pnl:,.0f}")
+        st.metric(label="Total Unrealized Net PnL", value=f"Rp {total_pnl:,.0f}", delta=f"{total_pnl:,.0f} (Net)")
+        st.caption(f"Note: Estimasi komisi {FEE_BELI*100}% beli & {FEE_JUAL*100}% jual (termasuk pajak/levy).")
 
 with tab_oracle:
     st.subheader("🧠 Gemini Oracle Analysis")
@@ -221,11 +240,10 @@ with tab_oracle:
                     model = genai.GenerativeModel(m_name)
                     prompt = f"Analisis teknikal IDX:{st.session_state.current_ticker}. Harga:{st.session_state.c_val}, TP:{st.session_state.tp_1}, SL:{st.session_state.sl}. Berikan strategi singkat dalam Bahasa Indonesia."
                     res = model.generate_content(prompt)
-                    st.success(f"Analisis Berhasil (Model: {m_name})")
+                    st.success(f"Analisis Berhasil!")
                     st.markdown(res.text)
                     success = True
                     break
-                except Exception as e:
-                    continue
+                except: continue
             if not success:
                 st.error("Gagal terhubung ke AI. Cek kuota atau koneksi internet.")
