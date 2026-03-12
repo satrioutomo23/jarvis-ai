@@ -12,15 +12,18 @@ from streamlit_autorefresh import st_autorefresh
 # =========================================================
 # 1. CORE SYSTEM & CONFIG
 # =========================================================
-st.set_page_config(page_title="Jarvis v13.0 Omni-Sovereign", layout="wide", page_icon="🔱")
+st.set_page_config(page_title="Jarvis v13.1 Omni-Portfolio", layout="wide", page_icon="🔱")
 st_autorefresh(interval=300000, key="jarvis_heartbeat")
 
-# Keamanan API Key
 if "GEMINI_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_KEY"])
 else:
     st.error("❌ API Key Gemini Missing! Masukkan GEMINI_KEY di Secrets.")
     st.stop()
+
+# Inisialisasi Database Portfolio di Session State
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = {}
 
 # =========================================================
 # 2. THE BRAIN: ANALYTICS & FUNCTIONS
@@ -93,7 +96,7 @@ def analyze_supreme_logic(df, ihsg_df=None):
 # 3. INTERFACE
 # =========================================================
 watchlist = ["BBRI.JK", "BBCA.JK", "BMRI.JK", "BBNI.JK", "TLKM.JK", "ASII.JK", "ADRO.JK", "GOTO.JK", "ANTM.JK", "PTBA.JK", "MEDC.JK", "BRIS.JK", "TPIA.JK"]
-st.title("🔱 Jarvis v13.0 Omni-Sovereign")
+st.title("🔱 Jarvis v13.1 Omni-Portfolio")
 
 ihsg = fetch_master_data("^JKSE")
 
@@ -102,19 +105,29 @@ with st.sidebar:
     cap = st.number_input("Modal Capital (Rp)", value=10000000, step=1000000)
     risk_pct = st.select_slider("Risk per Trade (%)", options=[0.5, 1.0, 2.0], value=1.0)
     sel = st.selectbox("🎯 Target Select", watchlist)
+    
+    st.divider()
+    st.subheader("📝 Log Position")
+    p_price = st.number_input("Entry Price", value=0)
+    p_lot = st.number_input("Lots", value=0)
+    if st.button("➕ Add to Portfolio"):
+        if p_price > 0 and p_lot > 0:
+            st.session_state.portfolio[sel] = {"price": p_price, "lots": p_lot}
+            st.success(f"Saved {sel}!")
+    if st.button("🗑️ Reset Portfolio"):
+        st.session_state.portfolio = {}
+        st.rerun()
 
-# Inisialisasi Data Global agar bisa diakses antar Tab
 df_main = analyze_supreme_logic(fetch_master_data(sel), ihsg)
 
 if not df_main.empty:
-    # Simpan ke session_state agar aman saat pindah tab
     st.session_state.current_ticker = sel
     st.session_state.c_val = df_main['Close'].iloc[-1]
     st.session_state.atr = df_main['ATR'].iloc[-1]
     st.session_state.tp_1 = int(st.session_state.c_val + (st.session_state.atr * 2))
     st.session_state.sl = int(st.session_state.c_val - (st.session_state.atr * 2))
 
-tab_radar, tab_sniper, tab_validate, tab_oracle = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "🧠 OMNI-INTEL"])
+tab_radar, tab_sniper, tab_validate, tab_portfolio, tab_oracle = st.tabs(["🚀 GLOBAL RADAR", "🎯 TACTICAL SNIPER", "📈 VALIDATOR", "💼 PORTFOLIO", "🧠 OMNI-INTEL"])
 
 with tab_radar:
     if st.button("🛰️ EXECUTE SUPREME SCAN"):
@@ -147,7 +160,7 @@ with tab_sniper:
             risk_amt = cap * (risk_pct / 100)
             risk_ps = st.session_state.c_val - st.session_state.sl
             lots = int(risk_amt / (risk_ps * 100)) if risk_ps > 0 else 0
-            st.info(f"**Size:** {lots} Lots")
+            st.info(f"**Size Recommendation:** {lots} Lots")
 
         with r_col:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
@@ -162,8 +175,40 @@ with tab_validate:
     if not df_main.empty:
         st.subheader(f"📈 Strategic Validation: {sel}")
         wr, profit = run_backtest(df_main.iloc[-252:])
-        st.metric("Win Rate", f"{wr:.1f}%")
+        st.metric("Win Rate (1Y)", f"{wr:.1f}%")
         st.line_chart(df_main.iloc[-252:]['Close'])
+
+with tab_portfolio:
+    st.subheader("📊 My Active Positions")
+    if not st.session_state.portfolio:
+        st.info("Portfolio kosong. Tambahkan posisi melalui sidebar.")
+    else:
+        p_data = []
+        total_pnl = 0
+        for tick, info in st.session_state.portfolio.items():
+            # Ambil harga terbaru untuk hitung PnL
+            current_df = fetch_master_data(tick)
+            if not current_df.empty:
+                current_p = current_df['Close'].iloc[-1]
+                buy_p = info['price']
+                lots = info['lots']
+                value_now = current_p * lots * 100
+                value_buy = buy_p * lots * 100
+                pnl = value_now - value_buy
+                pnl_pct = (pnl / value_buy) * 100
+                total_pnl += pnl
+                
+                p_data.append({
+                    "Ticker": tick,
+                    "Avg Price": f"{buy_p:,.0f}",
+                    "Current Price": f"{current_p:,.0f}",
+                    "Lots": lots,
+                    "PnL (Rp)": f"{pnl:,.0f}",
+                    "PnL (%)": f"{pnl_pct:.2f}%"
+                })
+        
+        st.table(pd.DataFrame(p_data))
+        st.metric("Total Unrealized PnL", f"Rp {total_pnl:,.0f}", delta=f"{total_pnl:,.0f}")
 
 with tab_oracle:
     st.subheader("🧠 Gemini Oracle Analysis")
@@ -174,7 +219,6 @@ with tab_oracle:
             for m_name in models:
                 try:
                     model = genai.GenerativeModel(m_name)
-                    # Mengambil data dari variabel yang sudah kita simpan tadi
                     prompt = f"Analisis teknikal IDX:{st.session_state.current_ticker}. Harga:{st.session_state.c_val}, TP:{st.session_state.tp_1}, SL:{st.session_state.sl}. Berikan strategi singkat dalam Bahasa Indonesia."
                     res = model.generate_content(prompt)
                     st.success(f"Analisis Berhasil (Model: {m_name})")
